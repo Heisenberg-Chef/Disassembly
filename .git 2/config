@@ -1,0 +1,10 @@
+[core]
+	repositoryformatversion = 0
+	filemode = false
+	bare = false
+	logallrefupdates = true
+	symlinks = false
+	ignorecase = true
+[remote "github"]
+	url = git@github.com:Rayqilei/Disassembly.git
+	fetch = +refs/heads/*:refs/remotes/github/*
