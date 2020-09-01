@@ -776,3 +776,139 @@ C/C++把内存换分为许多个区域 --> 之前写过了
 ### CRC算法的原理
 在对信息的处理过程中,我们可以将要被处理的数据块M看成一个n阶的二进制多项式
 
+---
+
+为了提高进度我会选择一些我比较感兴趣的内容去分析了,之后不按照书籍的章节了
+
+# 第四十九章 不正确的反汇编代码
+与opcode等长的ARM与MIPs指令集不同,x86框架下的指令长度不同,无论什么分析工具都会出现错误
+
+### 随机噪音,怎么看起来像是反汇编指令
+一般来说,我们可以从一下三点来判断一段程序是由随机代码组成的还是正常的程序段
++   不寻常的指令集集合:我们常见的指令一般都是push,mov,call,如果遇到了大杂烩式的稀有指令大拼盘(浮点运算FPU,输入输出IN/OUT指令和很少见的系统指令混在一起),这样来说多数情况下就是反汇编过程出现了问题.
+    +   IN/OUT是对我们系统的端口进行读取或者写入的IN AL,21H 向硬盘写入AL的数据
++   又大又像是随机数的数值,偏移量以及立即数
++   转移指令的偏移量不符合逻辑,**经常跳转到其他指令块的中间**.
+
+但是一些编写的良好的解压包或者加密程序代码(也包括一些变形代码),从代码来看是很想随机数指令序列的,然而一旦运行起来是非常正确的.
+
+# 第五十章 混淆技术
+书接上文,这就是我们说的加密技术,代码混淆技术是一种阻碍逆向工程分析人员解析程序代码的指令处理技术
+
+## 字符串变换
+在逆向工程中,字符串经常起到了路标的作用值得注意,我们经常会使用字符串来定位反汇编的程序,因此混淆技术会采用一些变换手法,让人不能直接使用IDA或者16进制编辑器直接搜索到字符串原文.
+
+例如:
+```
+mov byte ptr [ebx],'h'
+mov byte ptr [ebx+1],'a'
+...
+```
+或者
+```
+mov ebx,offset username
+cmp [ebx],'j'
+jnz fail
+....
+```
+不管是以上那种情况,我们使用十六进制的文本编辑器都是不能直接搜索出来字符串的**原文**.
+
+实际上这两种方法,适用于那些无法利用数据段构造数据的场景,因为他们可以在文本段直接构造数据,所以也常见于SHELLCODE和PIC
++   shellcode:shellcode是一段用于利用软件漏洞而执行的代码，shellcode为16进制的机器码，因为经常让攻击者获得shell而得名。shellcode常常使用机器语言编写。 可在暂存器eip溢出后，塞入一段可让CPU执行的shellcode机器码，让电脑可以执行攻击者的任意指令。(利用shellcode可以通过漏洞提升权限至root)
++   PIC是全微型单片机.
+
+另外,笔者还见过另类的使用sprintf()函数的
+```
+sprintf(buf,"%s%c%s%c%s","hel","l","o w","o","rld");
+```
+这段代码看起来异常的诡异,但是作为一个好的反汇编手段不失为一个很好的办法.
+
+## 可执行代码
+### 插入垃圾代码
+在正常执行一个程序的时候插入一些虽然可以被执行但是没有任何作用的代码,本身就是一种代码的混淆.
+
+例如
+```
+add eax,ebx
+mul ecx
+```
+采用了混淆之后的代码
+```
+xor esi,011223344h  ;garbage
+add esi,eax         ;garbage
+add eax,ebx
+mov edx,eax         ;garbage
+shl edx,4           ;garbage
+mul ecx
+xor esi,ecx         ;garbage
+```
+在代码中插入的混淆指令,调用了原来程序并不使用的ESI和EDX寄存器,混淆代码利用了源程序的中间之后,大幅度的增加了反编译的难度
+
+### 用多个指令组合代替原来的指令
++   MOV op1,op2这条指令,可以使用组合指令 : **PUSH op2,POP op1**来做到
++   JMP label指令可以用push label,ret这个指令对儿来代替.反编译工具IDA是不能够识别出来这种label的.
++   CALL label指令可以用一下三个指令来代替:push {label},ret
++   PUSH op可以用一下的指令代替,SUB ESP,4 ; MOV [ESP],op
+
+### 始终执行或者从来不会执行的代码
+下面的安利中,假设此处ESI的值肯定是0,那么我们可以在fake language插入任意长度和复杂度的指令,以达达到混淆的目的,这种技术称之为不透明谓词(opaque predicate)
+```
+mov esi,1
+... ; some code not touching ESI
+dec esi
+... ; some code not touching ESI
+cmp esi,0
+jz real_code_segment
+;fake....
+real_code:
+```
+或者在这段代码中(ESI我们设定为0)
+```
+add eax,ebx
+mul ecx
+add eax,esi
+```
+
+### 把指令乱序
+使用jmp把标签中的顺序打乱在进行一系列的跳转操作
+
+### 使用间接指针
+在使用偏移量的时候,可以让程序正常的使用变量,但是IDA查询会会出问题.
+
+### 虚拟机以及伪代码
+程序员可以构造一个虚拟机JAVA,这样的话反编译就会需要很多时间去理解这些细节.
+
+# 第五十一章 C++
+从汇编层面来看C++中的类(class)的组织方式和结构体数据完全一致.
++   ESP 与 EBP 如果相等那么就不是偏移量
++   ESP 与 EBP 如果不相等,那么就是偏移量了.
+
+继承类也是类似于结构体,但是他对父类进行了拓展
+
+# 第五十六章 Win32环境下与外部通信
+如果关注文件和注册表层的行为,使用SysInternals的Process Monitor即可,它可以给我们提供以上这两者的基本信息
+
+如果关注网络通信层面的数据,就可以使用Wireshark这类的软件进行抓包
+
+## 深入程序内部挖掘信息
+首先就要理解windows的API和标准库函数
+
+如果目标的程序有多个DLL文件,那么有这些DLL文件所提供的,课调用的函数名称就很有意义了.当我们只关注MessageBox(),显示特定文字指令,我们可以在程序的数据段解锁文本字符,找到这个字符串的指令,再顺藤摸瓜找到那些滴啊用MessageBox()的函数代码.
+
+在分析电脑游戏的时候,如果可以确定特定关卡的敌人总数是随机数,我们还可以查找rand()函数进行判断. 值得一体的是某些著名的压缩软件也用了rand()函数.
+
+## Windows API 最常用的函数
+这里列出来一些最常用的API函数,需要特别说明的是,这些函数可能不是由程序的源代码直接调用的,在程序调用库或者CRT的时候,他们被直接或者间接地调用了.
++   补充:CRT与WINDOWS API的关系，WINDOWS API作为Windows的一部份，是在CRT的基础上开发的。你可以将Windows（及其API）看作一个项目，而这个项目使用的语言是汇编/C/C ++，使用的类库就是CRT。所以，离开CRT，Windows API也无法使用的。
+
++   注册表访问(advapi32.dll):RegEnumKeyEx, RegEnumValue, RegGetValue7,RegOpenKeyEx, RegQueryValueEx
++   .ini文件访问(kernel32.dll): GetPrivateProfileString
++   资源访问: (user32.dll): LoadMen
++   TCP/IP网络(ws2_32.dll): WSARecv, WSASend
++    文件访问(kernel32.dll): CreateFile, ReadFile, ReadFileEx, WriteFile,WriteFileEx
++   Internet高级访问(wininet.dll): WinHttpOpen
++   可执行文件数字签名(wintrust.dll): WinVerifyTrust
++   标准MSVC库(如果是动态链接的) (msvcr*.dll): assert, itoa, ltoa, open, printf,read, strcmp, atol, atoi, fopen, fread, fwrite, memcmp, rand, strlen, strstr,
++   对话框的操作user32.dll:MessageBox,SetDlgItemText,GetDlgItemText 
+
+# 基本上算是完结了,这本书很好推荐大家有兴趣也可以看看<逆向工程权威指南>,其他的技术我会在需要的时候再看看,目前准备尝试一下游戏的逆向分析以及修改器的制作了.欢迎大家一起来交流啊.
